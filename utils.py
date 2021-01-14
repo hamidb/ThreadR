@@ -15,6 +15,6 @@ def compute_circular_pins(
   pins = num_pins * [[0, 0]]
   for i in range(num_pins):
     rad = 2.0 * math.pi * i / num_pins
-    pins[i] = (int(radius * math.cos(rad)) + offset[0],
-               int(radius * math.sin(rad)) + offset[1])
+    pins[i] = (int((radius-0.5) * math.cos(rad)) + offset[0],
+               int((radius-0.5) * math.sin(rad)) + offset[1])
   return pins

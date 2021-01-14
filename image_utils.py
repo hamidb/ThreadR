@@ -1,13 +1,55 @@
 """image_utils.py implements image utility methods."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+from __future__ import absolute_import, division, print_function
 
+import math
 from typing import List, Optional, Text, Tuple
 
 import cv2
 import numpy as np
+
+
+def channels(image: 'np.ndarray') -> int:
+  return image.shape[2] if len(image.shape) >= 3 else 1
+
+
+def line_length(p1: Tuple[int, int], p2: Tuple[int, int]) -> int:
+  dx = p2[0] - p1[0]
+  dy = p2[1] - p1[1]
+  return int(math.sqrt(dx * dx + dy * dy))
+
+
+def color_similarity_mono(c1: int, c2: int) -> int:
+  return math.sqrt((c1 - c2) * (c1 - c2))
+
+
+def color_similarity(c1: Tuple[int, int, int], c2: Tuple[int, int, int]) -> int:
+  diff0 = c1[0] - c2[0]
+  diff1 = c1[1] - c2[1]
+  diff2 = c1[2] - c2[2]
+  return math.sqrt(diff0 * diff0 + diff1 * diff1 + diff2 * diff2)
+
+
+def line_similarity(image: 'np.ndarray',
+                    src: Tuple[int, int],
+                    dst: Tuple[int, int],
+                    color: Tuple[int, int, int],
+                    length: int = -1) -> float:
+  # compute length if not given.
+  length = length if length >= 0 else line_length(src, dst)
+  value = 0
+  for k in range(length):
+    factor = float(k) / length
+    px = int(src[0] + factor * (dst[0] - src[0]))
+    py = int(src[1] + factor * (dst[1] - src[1]))
+    # TODO(hamidb): compensate for high contrast areas.
+    if channels(image) == 3:
+      value += 255 - color_similarity(image[py, px, :], color)
+    else:
+      avg = sum(color) // 3
+      print(sum(color), color)
+      value += 255 - color_similarity_mono(image[py, px], avg)
+  return value / length if length else value
 
 
 def crop(image: 'np.ndarray', box: Tuple[int, int, int, int]) -> 'np.ndarray':
