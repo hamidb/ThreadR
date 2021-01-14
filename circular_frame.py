@@ -119,7 +119,3 @@ class _CircularLayer:
     if best_pin_index != -1:
       self.current_pin_index = best_pin_index
     return self.pins[self.current_pin_index]
-
-
-
-
