@@ -42,16 +42,18 @@ class CircularFrame:
 
 class _CircularLayer:
 
-  def __init__(self,
-               image: 'numpy.ndarray',
-               radius: int = _DEFAULT_RADIUS,
-               origin: Tuple[int, int] = (0, 0),
-               image_origin: Tuple[int, int] = (0, 0),
-               pins: List[Tuple[int, int]] = [],
-               ignore_neighbor_ratio: float = 0.1,
-               thread_intensity: int = 20,
-               max_threads: int = _DEFAULT_MAX_THREADS,
-               max_thread_length: Optional[float] = None) -> None:
+  def __init__(
+      self,
+      image: 'numpy.ndarray',  # image for the layer
+      radius: int = _DEFAULT_RADIUS,  # layer radius
+      origin: Tuple[int, int] = (0, 0),  # layer origin w.r.t the frame
+      image_origin: Tuple[int, int] = (0, 0),  # image origin w.r.t the layer
+      pins: List[Tuple[int, int]] = [],  # location of layer pins.
+      ignore_neighbor_ratio: float = 0.1,  # ratio of adjacent pins to ignore.
+      thread_intensity: int = 20,  # how much darkness each line of thread adds.
+      max_threads: int = _DEFAULT_MAX_THREADS,  # maximum lines of threads.
+      max_thread_length: Optional[float] = None  # maximum length of the thread.
+  ) -> None:
     self.radius = radius
     self.origin = origin
     self.image = image
@@ -157,12 +159,16 @@ class _CircularLayer:
       pixel = self.working_image[py, px] + self.thread_intensity
       self.working_image[py, px] = min(255, pixel)
 
-    cv2.line(self.display_image,
-             (src[0] * _DISPLAY_SCALE, src[1] * _DISPLAY_SCALE),
-             (dst[0] * _DISPLAY_SCALE, dst[1] * _DISPLAY_SCALE), (0, 0, 0), 2,
-             cv2.LINE_AA, 0)
+    self.draw_line(src, dst)
 
     self.current_pin_index = next_pin_index
     self.max_threads -= 1
     self.max_thread_length -= length
     return length
+
+  def draw_line(self, src: Tuple[int, int], dst: Tuple[int, int]) -> None:
+    sx = _DISPLAY_SCALE * (src[0] + self.origin[0])
+    sy = _DISPLAY_SCALE * (src[1] + self.origin[1])
+    dx = _DISPLAY_SCALE * (dst[0] + self.origin[0])
+    dy = _DISPLAY_SCALE * (dst[1] + self.origin[1])
+    cv2.line(self.display_image, (sx, sy), (dx, dy), (0, 0, 0), 2, cv2.LINE_AA)
