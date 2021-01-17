@@ -30,28 +30,6 @@ def color_similarity(c1: Tuple[int, int, int], c2: Tuple[int, int, int]) -> int:
   return math.sqrt(diff0 * diff0 + diff1 * diff1 + diff2 * diff2)
 
 
-def line_similarity(image: 'np.ndarray',
-                    src: Tuple[int, int],
-                    dst: Tuple[int, int],
-                    color: Tuple[int, int, int],
-                    length: int = -1) -> float:
-  # compute length if not given.
-  length = length if length >= 0 else line_length(src, dst)
-  value = 0
-  for k in range(length):
-    factor = float(k) / length
-    px = int(src[0] + factor * (dst[0] - src[0]))
-    py = int(src[1] + factor * (dst[1] - src[1]))
-    # TODO(hamidb): compensate for high contrast areas.
-    if channels(image) == 3:
-      value += 255 - color_similarity(image[py, px, :], color)
-    else:
-      avg = sum(color) // 3
-      print(sum(color), color)
-      value += 255 - color_similarity_mono(image[py, px], avg)
-  return value / length if length else value
-
-
 def crop(image: 'np.ndarray', box: Tuple[int, int, int, int]) -> 'np.ndarray':
   x1, y1, x2, y2 = box
   if x1 < 0 or y1 < 0 or x2 > image.shape[1] or y2 > image.shape[0]:
@@ -92,5 +70,5 @@ def copy_to_roi(src: 'np.ndarray', dst: 'np.ndarray',
   dst_x2, dst_y2 = min(dst_w, roi[2]), min(dst_h, roi[3])
   src_x1, src_y1 = dst_x1 - roi[0], dst_y1 - roi[1]
   src_x2, src_y2 = dst_x2 - roi[0], dst_y2 - roi[1]
-  dst[dst_y1:dst_y2, dst_x1:dst_x2] = src[src_y1:src_y2, src_x1:src_x2]
+  dst[dst_y1:dst_y2, dst_x1:dst_x2, :] = src[src_y1:src_y2, src_x1:src_x2, :]
   return dst
