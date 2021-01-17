@@ -3,7 +3,9 @@
 from __future__ import absolute_import, division, print_function
 
 import math
+import os
 from collections import deque
+from datetime import datetime
 from functools import lru_cache
 from time import time
 from typing import List, Optional, Text, Tuple
@@ -15,8 +17,30 @@ import image_utils as image_utils
 import utils
 
 _DEFAULT_RADIUS = 250
-_DEFAULT_MAX_THREADS = 4000
-_DISPLAY_SCALE = 10
+_DEFAULT_MAX_THREADS = 3000
+_DISPLAY_SCALE = 12
+
+
+def simple_line_cost(image: 'np.ndarray', iterator: List[Tuple[int, int]]):
+  return sum([255 - int(image[py, px]) for px, py in iterator])
+
+
+def line_cost_contrast_corrected(image: 'np.ndarray',
+                                 iterator: List[Tuple[int, int]]):
+  value = 0
+  prev_intensity = image[iterator[0][1], iterator[0][0]]
+  for px, py in iterator:
+    pixel = int(image[py, px])
+    change = abs(pixel - prev_intensity)
+    prev_intensity = pixel
+    value += 255 - pixel + change
+  return value
+
+
+LINE_COST_FUNCTIONS = {
+    'SIMPLE_LINE_COST': simple_line_cost,
+    'LINE_COST_CONTRAST_CORRECTED': line_cost_contrast_corrected
+}
 
 
 class CircularFrame:
@@ -39,20 +63,24 @@ class CircularFrame:
   def run(self, debug_display: bool = True) -> None:
     self._layers[0].run()
 
+  def clear(self) -> None:
+    self._layers.clear()
+
 
 class _CircularLayer:
 
   def __init__(
       self,
-      image: 'numpy.ndarray',  # image for the layer
-      radius: int = _DEFAULT_RADIUS,  # layer radius
-      origin: Tuple[int, int] = (0, 0),  # layer origin w.r.t the frame
-      image_origin: Tuple[int, int] = (0, 0),  # image origin w.r.t the layer
+      image: 'numpy.ndarray',  # image for the layer.
+      radius: int = _DEFAULT_RADIUS,  # layer radius.
+      origin: Tuple[int, int] = (0, 0),  # layer origin w.r.t the frame.
+      image_origin: Tuple[int, int] = (0, 0),  # image origin w.r.t the layer.
       pins: List[Tuple[int, int]] = [],  # location of layer pins.
       ignore_neighbor_ratio: float = 0.1,  # ratio of adjacent pins to ignore.
       thread_intensity: int = 20,  # how much darkness each line of thread adds.
       max_threads: int = _DEFAULT_MAX_THREADS,  # maximum lines of threads.
-      max_thread_length: Optional[float] = None  # maximum length of the thread.
+      max_thread_length: Optional[float] = None,  # maximum length of threads.
+      correct_contrast: bool = False  # whether to compensate low contrast area.
   ) -> None:
     self.radius = radius
     self.origin = origin
@@ -63,6 +91,8 @@ class _CircularLayer:
     self.thread_intensity = thread_intensity
     self.max_threads = max_threads
     self.max_thread_length = max_thread_length or (max_threads * 2 * radius)
+    self.thread_count = 0
+    self.thread_length = 0
 
     self.ignore_neighbor_ratio = ignore_neighbor_ratio
     self.current_pin_index = 0
@@ -70,6 +100,11 @@ class _CircularLayer:
     self.last_visited_pins = utils.RingBuffer(size=20)
 
     self.build_working_images()
+
+    self.correct_contrast = correct_contrast
+    self.line_cost_func = LINE_COST_FUNCTIONS['SIMPLE_LINE_COST']
+    if self.correct_contrast:
+      self.line_cost_func = LINE_COST_FUNCTIONS['LINE_COST_CONTRAST_CORRECTED']
 
   def build_working_images(self) -> None:
     image = self.image
@@ -111,13 +146,18 @@ class _CircularLayer:
       cnt += 1
       done = self.add_next_line() == 0
       if cnt % 15 == 0:
-        print('processed {}/{} threads ...'.format(cnt, self.max_threads + cnt))
+        print('processed {}/{} threads ...'.format(self.thread_count,
+                                                   self.max_threads))
         if debug_display:
           display = cv2.resize(self.display_image, (1000, 1000))
           cv2.imshow("Display", display)
           cv2.imshow("Working image", self.working_image)
           cv2.waitKey(1)
     print('run time: ', time() - start)
+    now = datetime.now()
+
+    # Writing output to a file.
+    self.write_outputs()
 
   def get_next_pin(self) -> int:
     pin_cnt = len(self.pins)
@@ -133,7 +173,8 @@ class _CircularLayer:
       j = (i + step + 1) % pin_cnt
       if j in last_pins:
         continue
-      value = sum([255 - image[py, px] for px, py in self.get_linspace(i, j)])
+      prev_intensity = image[self.pins[i][1], self.pins[i][0]]
+      value = self.line_cost_func(image, self.get_linspace(i, j))
       if value > best_value:
         best_value = value
         best_pin_index = j
@@ -141,7 +182,8 @@ class _CircularLayer:
     return best_pin_index
 
   def add_next_line(self) -> int:
-    if self.max_threads <= 0 or self.max_thread_length <= 0:
+    if (self.thread_count >= self.max_threads or
+        self.thread_length >= self.max_thread_length):
       return 0
 
     next_pin_index = self.get_next_pin()
@@ -155,15 +197,14 @@ class _CircularLayer:
       factor = float(k) / length
       px = int(src[0] + factor * (dst[0] - src[0]))
       py = int(src[1] + factor * (dst[1] - src[1]))
-      # TODO(hamidb): compensate for high contrast areas.
-      pixel = self.working_image[py, px] + self.thread_intensity
+      pixel = int(self.working_image[py, px]) + self.thread_intensity
       self.working_image[py, px] = min(255, pixel)
 
     self.draw_line(src, dst)
 
     self.current_pin_index = next_pin_index
-    self.max_threads -= 1
-    self.max_thread_length -= length
+    self.thread_count += 1
+    self.thread_length += length
     return length
 
   def draw_line(self, src: Tuple[int, int], dst: Tuple[int, int]) -> None:
@@ -172,3 +213,20 @@ class _CircularLayer:
     dx = _DISPLAY_SCALE * (dst[0] + self.origin[0])
     dy = _DISPLAY_SCALE * (dst[1] + self.origin[1])
     cv2.line(self.display_image, (sx, sy), (dx, dy), (0, 0, 0), 2, cv2.LINE_AA)
+
+  def write_outputs(self) -> None:
+    if not os.path.exists('output'):
+      os.mkdir('output')
+
+    file_name_suffix = '{}-{}{}.png'.format(
+        datetime.now().strftime('%d%m%YT%H-%M'), self.thread_count,
+        '-corrected' if self.correct_contrast else '')
+
+    display_image = cv2.resize(self.display_image, (1000, 1000))
+    path = os.path.join('output', 'output-' + file_name_suffix)
+    cv2.imwrite(path, display_image)
+    print('Saved {}'.format(path))
+
+    path = os.path.join('output', 'err-' + file_name_suffix)
+    cv2.imwrite(path, self.working_image)
+    print('Saved {}'.format(path))

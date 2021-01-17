@@ -21,12 +21,14 @@ frame = CircularFrame(radius)
 
 # Creating pins and adding a single circular layer.
 pins = utils.compute_circular_pins(num_pins, radius, offset=(radius, radius))
-# Shift the center with (50, 20) pixels for better appearance.
+# Shift the center with (20, 0) pixels for better alignment.
 frame.add_new_layer(image,
                     radius,
-                    image_origin=(radius + 50, radius + 20),
+                    image_origin=(radius + 20, radius),
+                    max_threads=3000,
+                    correct_contrast=False,
                     pins=pins)
 frame.run()
-
+frame.clear()
 print('Process finished. Press any key to exit.')
 cv2.waitKey()
