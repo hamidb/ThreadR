@@ -19,17 +19,6 @@ def line_length(p1: Tuple[int, int], p2: Tuple[int, int]) -> int:
   return int(math.sqrt(dx * dx + dy * dy))
 
 
-def color_similarity_mono(c1: int, c2: int) -> int:
-  return math.sqrt((c1 - c2) * (c1 - c2))
-
-
-def color_similarity(c1: Tuple[int, int, int], c2: Tuple[int, int, int]) -> int:
-  diff0 = c1[0] - c2[0]
-  diff1 = c1[1] - c2[1]
-  diff2 = c1[2] - c2[2]
-  return math.sqrt(diff0 * diff0 + diff1 * diff1 + diff2 * diff2)
-
-
 def crop(image: 'np.ndarray', box: Tuple[int, int, int, int]) -> 'np.ndarray':
   x1, y1, x2, y2 = box
   if x1 < 0 or y1 < 0 or x2 > image.shape[1] or y2 > image.shape[0]:

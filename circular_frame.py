@@ -141,11 +141,9 @@ class _CircularLayer:
         cv2.circle(self.display_image, (px, py), 1 * _DISPLAY_SCALE,
                    (0, 255, 0), -1)
     done = False
-    cnt = 0
     while not done:
-      cnt += 1
       done = self.add_next_line() == 0
-      if cnt % 15 == 0:
+      if self.thread_count % 15 == 0:
         print('processed {}/{} threads ...'.format(self.thread_count,
                                                    self.max_threads))
         if debug_display:
@@ -173,7 +171,6 @@ class _CircularLayer:
       j = (i + step + 1) % pin_cnt
       if j in last_pins:
         continue
-      prev_intensity = image[self.pins[i][1], self.pins[i][0]]
       value = self.line_cost_func(image, self.get_linspace(i, j))
       if value > best_value:
         best_value = value
