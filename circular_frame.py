@@ -4,29 +4,34 @@ from __future__ import absolute_import, division, print_function
 
 import math
 import os
+import uuid
 from collections import deque
 from datetime import datetime
 from functools import lru_cache
 from time import time
-from typing import List, Optional, Text, Tuple
+from typing import List, NewType, Optional, Text, Tuple, Union
 
 import cv2
 import numpy as np
+from PIL import Image, ImageDraw
 
 import image_utils as image_utils
 import utils
 
 _DEFAULT_RADIUS = 250
 _DEFAULT_MAX_THREADS = 3000
-_DISPLAY_SCALE = 12
+_DISPLAY_SCALE = 2.0
+
+Color = NewType('Color', Union[Tuple[int, int, int], Tuple[int, int, int, int]])
+Point = NewType('Point', Tuple[int, int])
+cvImage = NewType('cvImage', 'np.ndarray')
 
 
-def simple_line_cost(image: 'np.ndarray', iterator: List[Tuple[int, int]]):
+def simple_line_cost(image: cvImage, iterator: List[Point]):
   return sum([255 - int(image[py, px]) for px, py in iterator])
 
 
-def line_cost_contrast_corrected(image: 'np.ndarray',
-                                 iterator: List[Tuple[int, int]]):
+def line_cost_corrected(image: cvImage, iterator: List[Point]):
   value = 0
   prev_intensity = image[iterator[0][1], iterator[0][0]]
   for px, py in iterator:
@@ -39,12 +44,11 @@ def line_cost_contrast_corrected(image: 'np.ndarray',
 
 LINE_COST_FUNCTIONS = {
     'SIMPLE_LINE_COST': simple_line_cost,
-    'LINE_COST_CONTRAST_CORRECTED': line_cost_contrast_corrected
+    'LINE_COST_CORRECTED': line_cost_corrected,
 }
 
 
 class CircularFrame:
-  _layers = []
 
   def __init__(self,
                radius: int = _DEFAULT_RADIUS,
@@ -54,33 +58,63 @@ class CircularFrame:
     self.max_threads = max_threads
     self.max_thread_length = max_thread_length or (max_threads * 2 * radius)
 
-  @classmethod
-  def add_new_layer(cls, *args, **kwargs) -> '_CircularLayer':
-    layer = _CircularLayer(*args, **kwargs)
-    cls._layers.append(layer)
+    self.layers = []
+    size = int(_DISPLAY_SCALE * 2 * radius)
+    self.frame_image = Image.new('RGB', (size, size), (255, 255, 255))
+    self.drawable = ImageDraw.Draw(self.frame_image, 'RGBA')
+
+  def add_new_layer(self, *args, **kwargs) -> 'CircularLayer':
+    layer = CircularLayer(*args, **kwargs)
+    layer.set_frame_drawable(self.drawable)
+    self.layers.append(layer)
     return layer
 
-  def run(self, debug_display: bool = True) -> None:
-    self._layers[0].run()
+  def run(self) -> None:
+    # Draw pins.
+    for layer in self.layers:
+      for px, py in layer.pins:
+        px = int((px + layer.origin[0]) * _DISPLAY_SCALE)
+        py = int((py + layer.origin[1]) * _DISPLAY_SCALE)
+        r = int(1 * _DISPLAY_SCALE)
+        self.drawable.ellipse((px - r, py - r, px + r, py + r),
+                              fill=(0, 128, 0, 255))
+
+    processed_layers = set()
+    total_threads = sum([l.max_threads for l in self.layers])
+    while len(processed_layers) < len(self.layers):
+      for layer in self.layers:
+        if layer in processed_layers:
+          continue
+        if layer.thread_count >= layer.max_threads:
+          processed_layers.add(layer)
+          continue
+        # Draw each layers' threads evenly.
+        layer.run(max(1, int(15 * layer.max_threads / total_threads)))
+        display = image_utils.pil_to_opencv(self.frame_image)
+        display = cv2.resize(display, (1000, 1000))
+        cv2.imshow('Frame Image', display)
+        cv2.waitKey(1)
 
   def clear(self) -> None:
-    self._layers.clear()
+    self.layers.clear()
 
 
-class _CircularLayer:
+class CircularLayer:
 
   def __init__(
       self,
-      image: 'numpy.ndarray',  # image for the layer.
+      image: cvImage,  # image for the layer.
       radius: int = _DEFAULT_RADIUS,  # layer radius.
-      origin: Tuple[int, int] = (0, 0),  # layer origin w.r.t the frame.
-      image_origin: Tuple[int, int] = (0, 0),  # image origin w.r.t the layer.
-      pins: List[Tuple[int, int]] = [],  # location of layer pins.
+      origin: Point = (0, 0),  # layer origin w.r.t the frame.
+      image_origin: Point = (0, 0),  # image origin w.r.t the layer.
+      pins: List[Point] = [],  # location of layer pins.
       ignore_neighbor_ratio: float = 0.1,  # ratio of adjacent pins to ignore.
       thread_intensity: int = 20,  # how much darkness each line of thread adds.
+      thread_color: Color = (0, 0, 0, 1),  # thread color for display.
       max_threads: int = _DEFAULT_MAX_THREADS,  # maximum lines of threads.
       max_thread_length: Optional[float] = None,  # maximum length of threads.
-      correct_contrast: bool = False  # whether to compensate low contrast area.
+      correct_contrast: bool = False,  # whether to penalty low contrast area.
+      layer_name: Text = str(uuid.uuid4())  # name of layer.
   ) -> None:
     self.radius = radius
     self.origin = origin
@@ -89,6 +123,7 @@ class _CircularLayer:
     self.pins = pins
 
     self.thread_intensity = thread_intensity
+    self.thread_color = thread_color
     self.max_threads = max_threads
     self.max_thread_length = max_thread_length or (max_threads * 2 * radius)
     self.thread_count = 0
@@ -99,12 +134,18 @@ class _CircularLayer:
     self.lengths = [image_utils.line_length(pins[0], pin) for pin in self.pins]
     self.last_visited_pins = utils.RingBuffer(size=20)
 
+    self.layer_name = layer_name
+
     self.build_working_images()
+    self.frame_drawable = None
 
     self.correct_contrast = correct_contrast
     self.line_cost_func = LINE_COST_FUNCTIONS['SIMPLE_LINE_COST']
     if self.correct_contrast:
-      self.line_cost_func = LINE_COST_FUNCTIONS['LINE_COST_CONTRAST_CORRECTED']
+      self.line_cost_func = LINE_COST_FUNCTIONS['LINE_COST_CORRECTED']
+
+  def set_frame_drawable(self, drawable: cvImage) -> None:
+    self.frame_drawable = drawable
 
   def build_working_images(self) -> None:
     image = self.image
@@ -112,50 +153,43 @@ class _CircularLayer:
       image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     self.working_image = image_utils.circular_crop(image, self.radius,
                                                    self.image_origin)
-    self.display_image = 255 * np.ones(
-        (_DISPLAY_SCALE * image.shape[0], _DISPLAY_SCALE * image.shape[1]),
-        dtype=np.uint8)
+    w, h = image.shape[1] * _DISPLAY_SCALE, image.shape[0] * _DISPLAY_SCALE
+    self.display_image = 255 * np.ones((int(h), int(w)), dtype=np.uint8)
 
-  def get_center(self) -> Tuple[int, int]:
+  def get_center(self) -> Point:
     return self.origin[0] + self.radius, self.origin[1] + self.radius
 
   @lru_cache(maxsize=None)
   def get_linspace(self, src_index, dst_index):
     length = self.lengths[abs(src_index - dst_index)]
     p0, p1 = self.pins[src_index], self.pins[dst_index]
-    lines = []
-    for k in range(length):
+    lines = [[0, 0] for _ in range(length)]
+    for i, k in enumerate(range(length)):
       factor = float(k) / length
-      x = int(p0[0] + factor * (p1[0] - p0[0]))
-      y = int(p0[1] + factor * (p1[1] - p0[1]))
-      lines.append([x, y])
+      lines[i][0] = int(p0[0] + factor * (p1[0] - p0[0]))
+      lines[i][1] = int(p0[1] + factor * (p1[1] - p0[1]))
     return lines
 
-  def run(self, debug_display: bool = True) -> None:
-    start = time()
-    if debug_display:
-      # Draw pins.
-      for px, py in self.pins:
-        px = (px + self.origin[0]) * _DISPLAY_SCALE
-        py = (py + self.origin[1]) * _DISPLAY_SCALE
-        cv2.circle(self.display_image, (px, py), 1 * _DISPLAY_SCALE,
-                   (0, 255, 0), -1)
-    done = False
-    while not done:
-      done = self.add_next_line() == 0
+  def run(self, max_iter: Optional[int] = None) -> None:
+    """run.
+
+    Args:
+        max_iter (Optional[int]): Specifies maximum iterations after which the
+        function returns. If None, there will be no constraints on iterations.
+
+    Returns:
+        None:
+    """
+    iteration = 0
+    while max_iter is None or iteration < max_iter:
+      if self.add_next_line() == 0:
+        break
       if self.thread_count % 15 == 0:
         print('processed {}/{} threads ...'.format(self.thread_count,
                                                    self.max_threads))
-        if debug_display:
-          display = cv2.resize(self.display_image, (1000, 1000))
-          cv2.imshow("Display", display)
-          cv2.imshow("Working image", self.working_image)
-          cv2.waitKey(1)
-    print('run time: ', time() - start)
-    now = datetime.now()
-
-    # Writing output to a file.
-    self.write_outputs()
+        cv2.imshow('Working image {}'.format(self.layer_name),
+                   self.working_image)
+      iteration += 1
 
   def get_next_pin(self) -> int:
     pin_cnt = len(self.pins)
@@ -204,12 +238,15 @@ class _CircularLayer:
     self.thread_length += length
     return length
 
-  def draw_line(self, src: Tuple[int, int], dst: Tuple[int, int]) -> None:
-    sx = _DISPLAY_SCALE * (src[0] + self.origin[0])
-    sy = _DISPLAY_SCALE * (src[1] + self.origin[1])
-    dx = _DISPLAY_SCALE * (dst[0] + self.origin[0])
-    dy = _DISPLAY_SCALE * (dst[1] + self.origin[1])
-    cv2.line(self.display_image, (sx, sy), (dx, dy), (0, 0, 0), 2, cv2.LINE_AA)
+  def draw_line(self, src: Point, dst: Point) -> None:
+    sx = int(_DISPLAY_SCALE * (src[0] + self.origin[0]))
+    sy = int(_DISPLAY_SCALE * (src[1] + self.origin[1]))
+    dx = int(_DISPLAY_SCALE * (dst[0] + self.origin[0]))
+    dy = int(_DISPLAY_SCALE * (dst[1] + self.origin[1]))
+    cv2.line(self.display_image, (sx, sy), (dx, dy), (0, 0, 0), 1, cv2.LINE_AA)
+    if self.frame_drawable is not None:
+      self.frame_drawable.line((sx, sy) + (dx, dy),
+                               fill=tuple(self.thread_color))
 
   def write_outputs(self) -> None:
     if not os.path.exists('output'):

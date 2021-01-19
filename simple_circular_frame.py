@@ -24,8 +24,11 @@ pins = utils.compute_circular_pins(num_pins, radius, offset=(radius, radius))
 # Shift the center with (20, 0) pixels for better alignment.
 frame.add_new_layer(image,
                     radius,
+                    layer_name='black',
                     image_origin=(radius + 20, radius),
                     max_threads=3000,
+                    thread_intensity=20,
+                    thread_color=(0, 0, 0, 100),
                     correct_contrast=False,
                     pins=pins)
 frame.run()
