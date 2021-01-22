@@ -64,7 +64,7 @@ def circular_crop(image: cvImage, radius: float,
 
 
 def copy_to_roi(src: cvImage, dst: cvImage, roi: Roi) -> cvImage:
-  assert (roi[0] <= roi[2] and roi[1] <= roi[3])
+  assert roi[0] <= roi[2] and roi[1] <= roi[3]
   dst_h, dst_w = dst.shape[:2]
   dst_x1, dst_y1 = max(0, roi[0]), max(0, roi[1])
   dst_x2, dst_y2 = min(dst_w, roi[2]), min(dst_h, roi[3])
