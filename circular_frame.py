@@ -20,7 +20,7 @@ import utils
 
 _DEFAULT_RADIUS = 250
 _DEFAULT_MAX_THREADS = 3000
-_DISPLAY_SCALE = 2.0
+_DISPLAY_SCALE = 4.0
 
 Color = NewType('Color', Union[Tuple[int, int, int], Tuple[int, int, int, int]])
 Point = NewType('Point', Tuple[int, int])
@@ -50,17 +50,20 @@ LINE_COST_FUNCTIONS = {
 
 class CircularFrame:
 
-  def __init__(self,
-               radius: int = _DEFAULT_RADIUS,
-               max_threads: int = _DEFAULT_MAX_THREADS,
-               max_thread_length: Optional[float] = None) -> None:
+  def __init__(
+      self,
+      radius: int = _DEFAULT_RADIUS,
+      max_threads: int = _DEFAULT_MAX_THREADS,
+      max_thread_length: Optional[float] = None,
+      background_color: Color = (255, 255, 255)  # background color for display.
+  ) -> None:
     self.radius = radius
     self.max_threads = max_threads
     self.max_thread_length = max_thread_length or (max_threads * 2 * radius)
 
     self.layers = []
     size = int(_DISPLAY_SCALE * 2 * radius)
-    self.frame_image = Image.new('RGB', (size, size), (255, 255, 255))
+    self.frame_image = Image.new('RGB', (size, size), background_color)
     self.drawable = ImageDraw.Draw(self.frame_image, 'RGBA')
 
   def add_new_layer(self, *args, **kwargs) -> 'CircularLayer':
@@ -245,8 +248,8 @@ class CircularLayer:
     dy = int(_DISPLAY_SCALE * (dst[1] + self.origin[1]))
     cv2.line(self.display_image, (sx, sy), (dx, dy), (0, 0, 0), 1, cv2.LINE_AA)
     if self.frame_drawable is not None:
-      self.frame_drawable.line((sx, sy) + (dx, dy),
-                               fill=tuple(self.thread_color))
+      image_utils.draw_line_aa(self.frame_drawable, sx, sy, dx, dy,
+                               tuple(self.thread_color))
 
   def write_outputs(self) -> None:
     if not os.path.exists('output'):
