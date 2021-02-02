@@ -33,28 +33,32 @@ class CircularFrame:
       radius: int = _DEFAULT_RADIUS,
       max_threads: int = _DEFAULT_MAX_THREADS,
       max_thread_length: Optional[float] = None,
+      display_scale: float = _DISPLAY_SCALE,
       background_color: Color = (255, 255, 255)  # background color for display.
   ) -> None:
     self.radius = radius
     self.max_threads = max_threads
     self.max_thread_length = max_thread_length or (max_threads * 2 * radius)
+    self.display_scale = display_scale
 
     self.layers = []
-    size = int(_DISPLAY_SCALE * 2 * radius)
+    size = int(self.display_scale * 2 * radius)
     self.frame_image = Image.new('RGB', (size, size), background_color)
     self.drawable = ImageDraw.Draw(self.frame_image, 'RGBA')
 
   def add_new_layer(self, layer: Layer) -> None:
     layer.set_frame_drawable(self.drawable)
+    layer.set_display_scale(self.display_scale)
+    layer.setup_layer()
     self.layers.append(layer)
 
   def run(self) -> None:
     # Draw pins.
     for layer in self.layers:
       for px, py in layer.pins:
-        px = int((px + layer.origin[0]) * _DISPLAY_SCALE)
-        py = int((py + layer.origin[1]) * _DISPLAY_SCALE)
-        r = int(1 * _DISPLAY_SCALE)
+        px = int((px + layer.origin[0]) * self.display_scale)
+        py = int((py + layer.origin[1]) * self.display_scale)
+        r = int(1 * self.display_scale)
         self.drawable.ellipse((px - r, py - r, px + r, py + r),
                               fill=(0, 128, 0, 255))
 

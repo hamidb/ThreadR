@@ -40,12 +40,12 @@ class AbstractLayer(metaclass=ABCMeta):
       image_origin: Point = (0, 0),  # image origin w.r.t the layer.
       pins: List[Point] = [],  # location of layer pins.
       ignore_neighbor_ratio: float = 0.1,  # ratio of adjacent pins to ignore.
+      ignore_last_n_visited_pins: int = 20,  # don't revisit last n pins.
       thread_intensity: int = 20,  # how much darkness each line of thread adds.
       thread_color: Color = (0, 0, 0, 255),  # thread color for display.
       max_threads: int = _DEFAULT_MAX_THREADS,  # maximum lines of threads.
       max_thread_length: Optional[float] = None,  # maximum length of threads.
       correct_contrast: bool = False,  # whether to penalty low contrast area.
-      display_scale: float = _DISPLAY_SCALE,  # scale factor for display image.
       layer_name: Text = str(uuid.uuid4())  # name of layer.
   ) -> None:
     self.radius = radius
@@ -60,20 +60,14 @@ class AbstractLayer(metaclass=ABCMeta):
     self.max_thread_length = max_thread_length or (max_threads * 2 * radius)
     self.thread_count = 0
     self.thread_length = 0
+    self.correct_contrast = correct_contrast
 
     self.ignore_neighbor_ratio = ignore_neighbor_ratio
+    self.last_visited_pins = utils.RingBuffer(ignore_last_n_visited_pins)
     self.current_pin_index = 0
-    self.lengths = [image_utils.line_length(pins[0], pin) for pin in self.pins]
-    self.last_visited_pins = utils.RingBuffer(size=20)
 
-    self.layer_name = layer_name
-
-    self.display_scale = display_scale
-    self.build_working_images()
     self.frame_drawable = None
-
-    self.correct_contrast = correct_contrast
-    self.set_line_cost_func()
+    self.layer_name = layer_name
 
     super().__init__()
 
@@ -96,6 +90,16 @@ class AbstractLayer(metaclass=ABCMeta):
   def set_frame_drawable(self, drawable: PImage) -> None:
     self.frame_drawable = drawable
 
+  def set_display_scale(self, display_scale: float) -> None:
+    self.display_scale = display_scale
+
+  def setup_layer(self) -> None:
+    assert len(self.pins) >= 2, 'At least 2 pins are required to build a layer!'
+    pins = self.pins
+    self.lengths = [image_utils.line_length(pins[0], pin) for pin in pins]
+    self.set_line_cost_func()
+    self.build_working_images()
+
   def get_center(self) -> Point:
     return self.origin[0] + self.radius, self.origin[1] + self.radius
 
@@ -112,9 +116,8 @@ class AbstractLayer(metaclass=ABCMeta):
 
   def get_next_pin(self) -> int:
     pin_cnt = len(self.pins)
-    best_value = -1
+    best_value = float('inf')
     best_pin_index = -1
-    image = self.working_image
 
     # Ignore neighboring pins to the current pin (if any).
     last_pins = set(self.last_visited_pins)
@@ -124,8 +127,9 @@ class AbstractLayer(metaclass=ABCMeta):
       j = (i + step + 1) % pin_cnt
       if j in last_pins:
         continue
-      value = self.line_cost_func(image, self.get_linspace(i, j))
-      if value > best_value:
+      value = self.line_cost_func(self.image, self.working_image,
+                                  self.thread_color, self.get_linspace(i, j))
+      if value < best_value:
         best_value = value
         best_pin_index = j
     self.last_visited_pins.append(best_pin_index)
