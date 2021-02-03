@@ -18,8 +18,7 @@ Color = NewType('Color', Union[Tuple[int, int, int], Tuple[int, int, int, int]])
 
 def simple_line_cost(src: cvImage, dst: cvImage, color: Color,
                      iterator: List[Point]) -> int:
-  value = sum([int(dst[py, px]) for px, py in iterator])
-  return -value
+  return sum([int(dst[py, px]) for px, py in iterator])
 
 
 def line_cost_corrected(src: cvImage, dst: cvImage, color: Color,
@@ -29,7 +28,7 @@ def line_cost_corrected(src: cvImage, dst: cvImage, color: Color,
   for px, py in iterator:
     src_p, dst_p = int(src[py, px]), int(dst[py, px])
     change = abs(prev_intensity - src_p)
-    value += src_p - dst_p + change
+    value += dst_p - src_p - change
     prev_intensity = src_p
   return value
 

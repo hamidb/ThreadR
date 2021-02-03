@@ -45,6 +45,7 @@ class AbstractLayer(metaclass=ABCMeta):
       thread_color: Color = (0, 0, 0, 255),  # thread color for display.
       max_threads: int = _DEFAULT_MAX_THREADS,  # maximum lines of threads.
       max_thread_length: Optional[float] = None,  # maximum length of threads.
+      alpha: float = 0.005,  # normalization factor to signify details vs shape.
       correct_contrast: bool = False,  # whether to penalty low contrast area.
       layer_name: Text = str(uuid.uuid4())  # name of layer.
   ) -> None:
@@ -60,6 +61,7 @@ class AbstractLayer(metaclass=ABCMeta):
     self.max_thread_length = max_thread_length or (max_threads * 2 * radius)
     self.thread_count = 0
     self.thread_length = 0
+    self.alpha = alpha
     self.correct_contrast = correct_contrast
 
     self.ignore_neighbor_ratio = ignore_neighbor_ratio
@@ -99,6 +101,13 @@ class AbstractLayer(metaclass=ABCMeta):
     self.lengths = [image_utils.line_length(pins[0], pin) for pin in pins]
     self.set_line_cost_func()
     self.build_working_images()
+    # pre-compute linespaces for higher performance.
+    self.linspaces = len(pins) * len(pins) * [None]
+    for i in range(len(self.pins)):
+      for j in range(i, len(self.pins)):
+        lines = self.get_linspace(i, j)
+        self.linspaces[i + j * len(pins)] = lines
+        self.linspaces[j + i * len(pins)] = lines
 
   def get_center(self) -> Point:
     return self.origin[0] + self.radius, self.origin[1] + self.radius
@@ -116,20 +125,24 @@ class AbstractLayer(metaclass=ABCMeta):
 
   def get_next_pin(self) -> int:
     pin_cnt = len(self.pins)
-    best_value = float('inf')
+    best_value = -1
     best_pin_index = -1
 
     # Ignore neighboring pins to the current pin (if any).
     last_pins = set(self.last_visited_pins)
     i = self.current_pin_index
     ignore = int(len(self.pins) * self.ignore_neighbor_ratio) // 2
+    size = len(self.pins)
     for step in range(ignore, pin_cnt - ignore - 1, 1):
       j = (i + step + 1) % pin_cnt
       if j in last_pins:
         continue
+      linespace = self.linspaces[i + size * j]
       value = self.line_cost_func(self.image, self.working_image,
-                                  self.thread_color, self.get_linspace(i, j))
-      if value < best_value:
+                                  self.thread_color, linespace)
+      value = abs(self.alpha * value -
+                  (1 - self.alpha) * value / len(linespace))
+      if value > best_value:
         best_value = value
         best_pin_index = j
     self.last_visited_pins.append(best_pin_index)
