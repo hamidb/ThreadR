@@ -6,17 +6,15 @@ from __future__ import absolute_import, division, print_function
 
 import cv2
 
-import image_utils
 import utils
 from circular_frame import CircularFrame
-from layers.monochrome_layer import MonochromeLayer
+from layers.simple_layer import SimpleLayer
 
+num_pins = 270
 radius = 250
-num_pins = 288
 
 # Reading input image.
 image = cv2.imread('data/images/pearl-girl-fg.png', cv2.IMREAD_UNCHANGED)
-#  image[image[:, :, 3] == 0] = [255, 255, 255, 255]
 image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 image = cv2.resize(image, (2 * radius, 2 * radius))
 cv2.imshow('Original image', image)
@@ -27,14 +25,15 @@ frame = CircularFrame(radius, display_scale=3.0)
 # Creating pins and adding a single circular layer.
 pins = utils.compute_circular_pins(num_pins, radius, offset=(radius, radius))
 frame.add_new_layer(
-    MonochromeLayer(image,
-                    radius,
-                    layer_name='black',
-                    image_origin=(radius, radius),
-                    max_threads=3500,
-                    thread_color=(0, 0, 0, 100),
-                    correct_contrast=False,
-                    pins=pins))
+    SimpleLayer(image=image,
+                name='black',
+                radius=radius,
+                image_origin=(radius, radius),
+                max_threads=4000,
+                thread_intensity=25,
+                thread_color=(0, 0, 0, 70),
+                norm_factor=0.006,
+                pins=pins))
 frame.run()
 frame.clear()
 print('Process finished. Press any key to exit.')
